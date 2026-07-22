@@ -12,4 +12,4 @@ The damage was predictable, and it happened:
 3. Every quarter, audit documents were emailed to external auditors as attachments - and copies still sit in those auditors' inboxes today, unrecoverable.
 
 ## Architecture diagram
-![Architecture](architecture/'FinTrustDocs Architectural diagram.png')
+![Architecture](architecture/FinTrust-Architecture.png)
