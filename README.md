@@ -10,3 +10,6 @@ The damage was predictable, and it happened:
 1. A laptop failure destroyed the only copy of several loan files.
 2. A junior staff member turned out to have access to high-net-worth client records completely unrelated to their role.
 3. Every quarter, audit documents were emailed to external auditors as attachments - and copies still sit in those auditors' inboxes today, unrecoverable.
+
+## Architecture diagram
+![Architecture](architecture/'FinTrustDocs Architectural diagram.png')
