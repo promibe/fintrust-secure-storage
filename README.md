@@ -38,6 +38,7 @@ The damage was predictable, and it happened:
 ## Rebuild from scratch 
 ### Clone the repo
 ```git clone https://github.com/promibe/fintrust-secure-storage.git```
+
 ```cd fintrust-secure-storage/scripts```
 
 ### Phase 1: Foundation
@@ -51,8 +52,11 @@ bash 03-sas-policy.azcli
 
 ### Phase 4: Lifecycle policy
 ```az storage account management-policy create \```
+
 ```  --account-name stfintrustdocs \```
+
 ```  --resource-group rg-fintrust-prod \```
+
 ```  --policy @lifecycle-policy.json```
 
 
