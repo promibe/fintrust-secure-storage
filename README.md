@@ -60,9 +60,10 @@ bash 03-sas-policy.azcli
 bash
 ```az group delete -n rg-fintrust-prod --yes```
 
-Links
+## Links
+Follow the links below for the full write-up and project walkthrought
 
-📝 Full write-up: 
+📝 Full write-up: https://medium.com/@promiseibediogwu1/i-gave-an-external-auditor-90-days-of-access-to-financial-documents-with-a-kill-switch-cc97a9310700
 
 🎬 Walkthrough: [Loom link]
 
