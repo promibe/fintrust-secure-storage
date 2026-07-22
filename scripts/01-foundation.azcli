@@ -1,0 +1,71 @@
+# =============================================================
+# FinTrust Secure Storage — Phase 1: Foundation
+# Project  : FT-AZ-001
+# Author   : Promise (Cloud Data Scientist | Data Engineer)
+# Purpose  : Create resource group, storage account (hardened,
+#            GRS), and the three blob containers by data class.
+# Usage    : Run in Azure Cloud Shell (Bash) or local Azure CLI.
+#            Replace <SA> with your unique storage account name.
+# =============================================================
+
+# ── Variables ─────────────────────────────────────────────────
+RG="rg-fintrust-prod"
+SA="stfintrustdocs"          # must be globally unique, 3-24 chars, lowercase
+LOCATION="EastUs"  # use the closest region to you or compare cost
+
+# ── 1. Resource group ─────────────────────────────────────────
+az group create \
+  --name $RG \
+  --location $LOCATION
+
+# ── 2. Storage account ────────────────────────────────────────
+# Decisions documented:
+#   --sku Standard_GRS   : geo-redundant; survives regional failure (R1)
+#                          LRS = 1 datacenter only; ZRS = 1 region only
+#   --min-tls-version    : TLS 1.2 minimum; older versions deprecated (R7)
+#   --https-only true    : refuse all plaintext HTTP connections (R7)
+#   --allow-blob-public-access false : every request must present a
+#                          credential; nothing anonymously reachable (R7)
+az storage account create \
+  --name $SA \
+  --resource-group $RG \
+  --location $LOCATION \
+  --sku Standard_GRS \
+  --kind StorageV2 \
+  --min-tls-version TLS1_2 \
+  --https-only true \
+  --allow-blob-public-access false
+
+# ── 3. Verify hardening ───────────────────────────────────────
+az storage account show \
+  --name $SA \
+  --resource-group $RG \
+  --query "{Replication:sku.name, TLS:minimumTlsVersion, HTTPSOnly:enableHttpsTrafficOnly, AnonAccess:allowBlobPublicAccess}" \
+  --output table
+
+# ── 4. Three containers by data classification ────────────────
+# All set to private (no container-level public access).
+# client-documents : active KYC records and loan files (Hot tier)
+# audit-reports    : quarterly audit reports for external auditors (Cool-bound)
+# archive-records  : 7-year statutory retention records (lifecycle → Archive)
+
+for CONTAINER in client-documents audit-reports archive-records; do
+  az storage container create \
+    --name $CONTAINER \
+    --account-name $SA \
+    --auth-mode login
+  echo "Created container: $CONTAINER"
+done
+
+# ── 5. Confirm containers ─────────────────────────────────────
+az storage container list \
+  --account-name $SA \
+  --auth-mode login \
+  --query "[].{Container:name, PublicAccess:properties.publicAccess}" \
+  --output table
+
+echo ""
+echo "Phase 1 complete."
+echo "Storage account : $SA"
+echo "Resource group  : $RG"
+echo "Containers      : client-documents | audit-reports | archive-records"

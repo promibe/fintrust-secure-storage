@@ -1,0 +1,137 @@
+# =============================================================
+# FinTrust Secure Storage — Phase 3: Auditor Access
+# Project  : FT-AZ-001
+# Author   : Promise (Cloud Data Scientist | Data Engineer)
+# Purpose  : Create a stored access policy on audit-reports
+#            and generate a service SAS referencing it.
+#            Includes kill-switch and resurrection commands.
+# Pre-req  : Phase 1 complete. Run in Azure Cloud Shell (Bash).
+# =============================================================
+
+# ── Variables ─────────────────────────────────────────────────
+SA="stfintrustdocs"
+RG="rg-fintrust-prod"
+CONTAINER="audit-reports"
+POLICY_NAME="auditor-q3-2026"
+
+# Account key required for service SAS and stored access policies.
+# User delegation SAS (the portal default) CANNOT reference stored
+# access policies and caps at ~7 days — incompatible with this brief.
+KEY=$(az storage account keys list \
+  --account-name $SA \
+  --resource-group $RG \
+  --query "[0].value" -o tsv)
+
+# ── 1. Stored access policy ───────────────────────────────────
+# The policy holds permissions (read + list) and the 90-day window.
+# The SAS token itself carries NO permissions — it only references
+# this policy by name. This is what makes revocation possible:
+# delete the policy → every SAS referencing it dies instantly,
+# without rotating account keys or disrupting any other access.
+#
+# Permissions: r = read, l = list
+# Adjust --start and --expiry dates each quarter.
+
+START=$(date -u +"%Y-%m-%dT00:00Z")
+EXPIRY=$(date -u -d "+90 days" +"%Y-%m-%dT00:00Z" 2>/dev/null || \
+         date -u -v+90d +"%Y-%m-%dT00:00Z")   # macOS fallback
+
+az storage container policy create \
+  --container-name $CONTAINER \
+  --name $POLICY_NAME \
+  --permissions rl \
+  --start $START \
+  --expiry $EXPIRY \
+  --account-name $SA \
+  --account-key $KEY
+
+echo "Stored access policy created: $POLICY_NAME"
+echo "Window: $START → $EXPIRY"
+echo ""
+
+# ── 2. Generate the SAS from the policy ───────────────────────
+# The SAS references the policy — not a copy of its permissions.
+# Note: --policy-name references the stored policy; no --permissions flag.
+
+SAS=$(az storage container generate-sas \
+  --name $CONTAINER \
+  --policy-name $POLICY_NAME \
+  --account-name $SA \
+  --account-key $KEY \
+  --output tsv)
+
+echo "SAS token:"
+echo "$SAS"
+echo ""
+
+# Full URL for the auditor (container listing):
+echo "Auditor URL (list all blobs):"
+echo "https://$SA.blob.core.windows.net/$CONTAINER?$SAS&restype=container&comp=list"
+echo ""
+
+# Per-file URL pattern (replace FILENAME):
+echo "Per-file download URL pattern:"
+echo "https://$SA.blob.core.windows.net/$CONTAINER/FILENAME.pdf?$SAS"
+echo ""
+
+echo "Deliver via Azure Storage Explorer:"
+echo "  Connect → Blob container → Shared access signature URL"
+echo "  URL: https://$SA.blob.core.windows.net/$CONTAINER?$SAS"
+echo ""
+
+# ── 3. Test: verify the SAS is read-only (R4) ─────────────────
+# Run this from PowerShell on the auditor's machine (or Cloud Shell)
+# to confirm an upload attempt fails with 403 AuthorizationPermissionMismatch.
+#
+# azcopy copy "localfile.txt" \
+#   "https://$SA.blob.core.windows.net/$CONTAINER/localfile.txt?$SAS"
+#
+# Expected: RESPONSE 403 — AuthorizationPermissionMismatch
+#           Total Number of Bytes Transferred: 0
+
+# ── 4. Kill switch ────────────────────────────────────────────
+# Run this to instantly revoke ALL auditor access.
+# Every SAS referencing this policy dies — no key rotation needed.
+# Other containers, staff access, and account keys are unaffected.
+
+revoke_auditor_access() {
+  az storage container policy delete \
+    --container-name $CONTAINER \
+    --name $POLICY_NAME \
+    --account-name $SA \
+    --account-key $KEY
+  echo "Kill switch fired: policy $POLICY_NAME deleted."
+  echo "All SAS tokens referencing this policy are now invalid."
+  echo "Existing SAS URLs return: 403 AuthenticationFailed"
+  echo "'SAS identifier cannot be found for specified signed identifier'"
+}
+
+# Uncomment to fire:
+# revoke_auditor_access
+
+# ── 5. Resurrection ───────────────────────────────────────────
+# Re-create the policy with the SAME NAME after revocation.
+# The original SAS URL references the policy by name — it comes
+# back to life without any change to the token or the URL.
+# This confirms the SAS itself was never the secret; the policy was.
+
+resurrect_auditor_access() {
+  az storage container policy create \
+    --container-name $CONTAINER \
+    --name $POLICY_NAME \
+    --permissions rl \
+    --start $START \
+    --expiry $EXPIRY \
+    --account-name $SA \
+    --account-key $KEY
+  echo "Policy restored: $POLICY_NAME"
+  echo "Original SAS URL is live again — no token change required."
+}
+
+# Uncomment to resurrect:
+# resurrect_auditor_access
+
+echo "Phase 3 complete."
+echo ""
+echo "Quarter renewal: update --start and --expiry, re-run sections 1 and 2,"
+echo "deliver the new SAS URL to the incoming audit team."

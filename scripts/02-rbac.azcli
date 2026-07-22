@@ -1,0 +1,109 @@
+# =============================================================
+# FinTrust Secure Storage — Phase 2: Staff Access via RBAC
+# Project  : FT-AZ-001
+# Author   : Promise (Cloud Data Scientist | Data Engineer)
+# Purpose  : Create test identities, Entra ID security groups,
+#            and assign data-plane roles at container scope.
+# Pre-req  : Phase 1 (01-foundation.azcli) must be complete.
+#            Run in Azure Cloud Shell (Bash).
+# =============================================================
+
+# ── Variables ─────────────────────────────────────────────────
+RG="rg-fintrust-prod"
+SA="stfintrustdocs"
+SUBSCRIPTION=$(az account show --query id -o tsv)
+
+# ── 1. Test users ─────────────────────────────────────────────
+# Two personas with different access needs:
+#   ada.reviewer   → read-only access to client-documents
+#   emeka.handler  → read-write access to client-documents
+# Get the Entra ID domain from your tenant
+DOMAIN=$(az ad signed-in-user show --query userPrincipalName -o tsv | cut -d@ -f2)
+
+az ad user create \
+  --display-name "Ada Reviewer" \
+  --user-principal-name "ada.reviewer@$DOMAIN" \
+  --password "ChangeMe123!" \
+  --force-change-password-next-sign-in true
+
+az ad user create \
+  --display-name "Emeka Handler" \
+  --user-principal-name "emeka.handler@$DOMAIN" \
+  --password "ChangeMe123!" \
+  --force-change-password-next-sign-in true
+
+# ── 2. Security groups ────────────────────────────────────────
+# Groups, not individual users — joiners/leavers are a group
+# membership change, not a role assignment change (R2).
+az ad group create \
+  --display-name "FinTrust-Docs-Readers" \
+  --mail-nickname "ftreaders"
+
+az ad group create \
+  --display-name "FinTrust-Docs-Contributors" \
+  --mail-nickname "ftcontrib"
+
+# ── 3. Add users to groups ────────────────────────────────────
+READERS_ID=$(az ad group show -g "FinTrust-Docs-Readers" --query id -o tsv)
+CONTRIB_ID=$(az ad group show -g "FinTrust-Docs-Contributors" --query id -o tsv)
+ADA_ID=$(az ad user show --id "ada.reviewer@$DOMAIN" --query id -o tsv)
+EMEKA_ID=$(az ad user show --id "emeka.handler@$DOMAIN" --query id -o tsv)
+
+az ad group member add --group $READERS_ID --member-id $ADA_ID
+az ad group member add --group $CONTRIB_ID --member-id $EMEKA_ID
+
+echo "Users added to groups."
+
+# ── 4. Role assignments at CONTAINER scope ────────────────────
+# CRITICAL: scope to the container, not the storage account.
+# These groups get NOTHING on audit-reports or archive-records.
+#
+# Why data-plane roles, not generic Contributor?
+#   Contributor = control-plane (manage the resource as Azure object)
+#   Storage Blob Data Reader/Contributor = data-plane (read/write the blobs)
+#   An Owner of the storage account cannot read blobs with Entra auth
+#   unless also assigned a data-plane role. Two separate systems.
+#
+# Note on portal visibility: data-plane roles alone don't let users
+# navigate the portal (control plane). Add Reader at account scope
+# for portal convenience, or direct users to Storage Explorer / CLI.
+
+CONTAINER_SCOPE="/subscriptions/$SUBSCRIPTION/resourceGroups/$RG\
+/providers/Microsoft.Storage/storageAccounts/$SA\
+/blobServices/default/containers/client-documents"
+
+# Readers group → Storage Blob Data Reader on client-documents
+az role assignment create \
+  --assignee-object-id $READERS_ID \
+  --assignee-principal-type Group \
+  --role "Storage Blob Data Reader" \
+  --scope $CONTAINER_SCOPE
+
+# Contributors group → Storage Blob Data Contributor on client-documents
+az role assignment create \
+  --assignee-object-id $CONTRIB_ID \
+  --assignee-principal-type Group \
+  --role "Storage Blob Data Contributor" \
+  --scope $CONTAINER_SCOPE
+
+echo ""
+echo "Role assignments complete."
+echo ""
+
+# ── 5. Verify assignments ─────────────────────────────────────
+az role assignment list \
+  --scope $CONTAINER_SCOPE \
+  --query "[].{Principal:principalName, Role:roleDefinitionName, Scope:scope}" \
+  --output table
+
+echo ""
+echo "Phase 2 complete."
+echo ""
+echo "Test the assignments (allow ~5 min for propagation):"
+echo "  Reader  (Ada)   : should DOWNLOAD blobs, FAIL on upload"
+echo "  Contributor (Emeka) : should upload AND download"
+echo "  Either user : should be DENIED on audit-reports and archive-records"
+echo ""
+echo "IMPORTANT: When testing in portal, switch Authentication method"
+echo "to 'Microsoft Entra user account' — testing with Access key"
+echo "bypasses RBAC entirely and invalidates your test."
